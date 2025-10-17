@@ -54,3 +54,12 @@ Clone the repository and build with Cargo:
 git clone https://github.com/Arekkusul/Rustypipe.git
 cd Rustypipe
 cargo build --release
+
+Run a simple pipeline:
+```bash
+cargo run -- run ./examples/sample_pipeline.yaml
+
+Validate a pipeline YAML:
+```bash
+cargo run -- validate ./examples/sample_pipeline.yaml
+
