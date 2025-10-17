@@ -1,0 +1,1 @@
+{"command":"Invoke-WebRequest -Uri \"https://raw.githubusercontent.com/EbookFoundation/free-programming-books/master/books/free-programming-books-langs.md\" -OutFile \"file.txt\"","exit_code":0,"task":"download","timestamp":"2025-10-17T02:51:06.137024400+00:00"}

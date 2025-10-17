@@ -1,0 +1,20 @@
+name: sample_full
+concurrency: 3
+stop_on_fail: true
+
+tasks:
+  - name: download
+    run: Invoke-WebRequest -Uri "https://raw.githubusercontent.com/EbookFoundation/free-programming-books/master/books/free-programming-books-langs.md" -OutFile "file.txt"
+    backend: local
+    retries: 2
+    timeout: 60
+
+  - name: count
+    depends_on: [download]
+    run: "(Get-Content file.txt).Length"
+    backend: local
+
+  - name: echo
+    depends_on: [count]
+    run: "Write-Output \"The file length was {{count.output}}\""
+    backend: local

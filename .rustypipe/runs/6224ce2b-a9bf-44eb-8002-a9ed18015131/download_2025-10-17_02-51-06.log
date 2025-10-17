@@ -1,0 +1,7 @@
+Task: download
+Cmd: Invoke-WebRequest -Uri "https://raw.githubusercontent.com/EbookFoundation/free-programming-books/master/books/free-programming-books-langs.md" -OutFile "file.txt"
+Exit: Some(0)
+Stdout:
+
+Stderr:
+

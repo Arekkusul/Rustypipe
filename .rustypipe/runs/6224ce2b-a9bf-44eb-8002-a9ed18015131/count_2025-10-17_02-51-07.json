@@ -1,0 +1,1 @@
+{"command":"(Get-Content file.txt).Length","exit_code":0,"task":"count","timestamp":"2025-10-17T02:51:07.021882200+00:00"}

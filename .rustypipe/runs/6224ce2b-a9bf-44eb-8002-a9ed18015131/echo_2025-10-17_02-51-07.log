@@ -1,0 +1,8 @@
+Task: echo
+Cmd: Write-Output "The file length was 2736"
+Exit: Some(0)
+Stdout:
+The file length was 2736
+
+Stderr:
+
