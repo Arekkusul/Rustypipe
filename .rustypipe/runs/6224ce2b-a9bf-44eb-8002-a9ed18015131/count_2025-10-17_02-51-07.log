@@ -1,8 +1,0 @@
-Task: count
-Cmd: (Get-Content file.txt).Length
-Exit: Some(0)
-Stdout:
-2736
-
-Stderr:
-
