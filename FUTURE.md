@@ -8,9 +8,12 @@
 Planned improvements:
 
 1. Web-based Monitoring UI
-2. Additional Backends (SSH, Docker, Cloud)
-3. Persistent Scheduler with DAG backfills
-4. Centralized logging and artifact tracking
-5. Plugin system for custom extensions
-6. Distributed execution across multiple nodes
-7. Advanced error handling strategies
+2. Persistent Scheduler with DAG backfills
+3. Centralized logging and artifact tracking
+4. Plugin system for custom extensions
+5. Distributed execution across multiple nodes
+6. Advanced error handling strategies
+7. Connect the individual backends and make a backend manager UI.
+
+Done Improvements:
+1. Additional Backends (SSH, Docker, Kubernetes) 
