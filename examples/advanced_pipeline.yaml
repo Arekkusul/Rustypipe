@@ -1,0 +1,63 @@
+name: advanced_demo
+concurrency: 3
+stop_on_fail: false
+
+# Backend configurations
+backends:
+  local_backend:
+    type: local
+
+  # Uncomment to use SSH backend
+  # my_server:
+  #   type: ssh
+  #   host: 192.168.1.100
+  #   user: deploy
+  #   key_path: ~/.ssh/id_rsa
+
+  # Uncomment to use Docker backend
+  # ubuntu_container:
+  #   type: docker
+  #   image: ubuntu:22.04
+
+  # Uncomment to use Kubernetes backend
+  # k8s_pod:
+  #   type: kubernetes
+  #   image: ubuntu:22.04
+  #   namespace: default
+
+# Secrets (for sensitive data)
+secrets:
+  API_KEY: "your-secret-api-key-here"
+  DB_PASSWORD: "your-database-password"
+
+tasks:
+  - name: setup
+    run: "echo 'Setting up environment' && mkdir -p output"
+    backend: local_backend
+    retries: 1
+    timeout: 30
+
+  - name: fetch_data
+    depends_on: [setup]
+    run: "echo 'Fetching data...'; echo 'Data: Sample output' > output/data.txt"
+    backend: local_backend
+    cache_key: "fetch-data-v1"  # Cache this task
+    retries: 2
+    timeout: 60
+
+  - name: process_data
+    depends_on: [fetch_data]
+    run: "cat output/data.txt && echo 'Processed'"
+    backend: local_backend
+
+  - name: optional_task
+    depends_on: [process_data]
+    run: "exit 1"  # This will fail
+    backend: local_backend
+    continue_on_fail: true  # But won't stop the pipeline
+
+  - name: final_task
+    depends_on: [process_data, optional_task]
+    run: "echo 'Pipeline completed!' && echo 'Output: {{process_data.output}}'"
+    backend: local_backend
+    retries: 1

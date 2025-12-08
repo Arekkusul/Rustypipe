@@ -1,18 +1,71 @@
-use std::env;
+use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
-pub struct Opts {
-    pub subcommand: String,
-    pub path: String,
+#[derive(Parser, Debug)]
+#[command(name = "rustypipe")]
+#[command(author, version, about = "A lightweight, dependency-aware pipeline executor", long_about = None)]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Commands,
+
+    /// Enable verbose logging
+    #[arg(short, long, global = true)]
+    pub verbose: bool,
 }
 
-pub fn get_opts() -> Opts {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 3 {
-        eprintln!("Usage: rustypipe <run|validate> <pipeline.yaml>");
-        std::process::exit(1);
-    }
-    Opts {
-        subcommand: args[1].clone(),
-        path: args[2].clone(),
-    }
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// Run a pipeline from a YAML file
+    Run {
+        /// Path to the pipeline YAML file
+        #[arg(value_name = "PIPELINE_FILE")]
+        path: PathBuf,
+
+        /// Override concurrency limit
+        #[arg(short, long)]
+        concurrency: Option<usize>,
+
+        /// Stop on first failure (overrides pipeline config)
+        #[arg(long)]
+        stop_on_fail: bool,
+
+        /// Continue on all failures (overrides pipeline config)
+        #[arg(long, conflicts_with = "stop_on_fail")]
+        continue_on_fail: bool,
+    },
+
+    /// Validate a pipeline YAML file without running it
+    Validate {
+        /// Path to the pipeline YAML file
+        #[arg(value_name = "PIPELINE_FILE")]
+        path: PathBuf,
+    },
+
+    /// List all pipeline runs
+    History {
+        /// Limit number of runs to show
+        #[arg(short = 'n', long, default_value = "10")]
+        limit: usize,
+    },
+
+    /// Show details of a specific run
+    Show {
+        /// Run ID to show details for
+        #[arg(value_name = "RUN_ID")]
+        run_id: String,
+    },
+
+    /// Clear the cache
+    ClearCache,
+
+    /// Clean up old pipeline runs
+    Clean {
+        /// Keep only the N most recent runs
+        #[arg(short, long, default_value = "10")]
+        keep: usize,
+    },
+}
+
+pub fn get_cli() -> Cli {
+    Cli::parse()
 }

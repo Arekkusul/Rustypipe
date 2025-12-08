@@ -25,12 +25,13 @@ impl Backend for LocalBackend {
             c.arg("-NoLogo").arg("-NoProfile").arg("-Command").arg(cmd).current_dir(cwd);
 
             if let Some(secs) = timeout_secs {
-                let mut child = c
+                let child = c
                     .stdout(std::process::Stdio::piped())
                     .stderr(std::process::Stdio::piped())
                     .spawn()
                     .context("local backend failed to spawn process")?;
-                match tokio::time::timeout(std::time::Duration::from_secs(secs), child.wait_with_output()).await {
+                let wait_future = child.wait_with_output();
+                match tokio::time::timeout(std::time::Duration::from_secs(secs), wait_future).await {
                     Ok(output_res) => {
                         let output = output_res.context("waiting for child failed")?;
                         let out = String::from_utf8_lossy(&output.stdout).to_string();
@@ -38,8 +39,6 @@ impl Backend for LocalBackend {
                         return Ok((out, err, output.status));
                     }
                     Err(_) => {
-                        let _ = child.kill();
-                        let _ = child.wait().await;
                         return Err(anyhow::anyhow!("local backend timed out after {}s", secs));
                     }
                 }
@@ -54,12 +53,13 @@ impl Backend for LocalBackend {
             c.arg("-c").arg(cmd).current_dir(cwd);
 
             if let Some(secs) = timeout_secs {
-                let mut child = c
+                let child = c
                     .stdout(std::process::Stdio::piped())
                     .stderr(std::process::Stdio::piped())
                     .spawn()
                     .context("local backend failed to spawn process")?;
-                match tokio::time::timeout(std::time::Duration::from_secs(secs), child.wait_with_output()).await {
+                let wait_future = child.wait_with_output();
+                match tokio::time::timeout(std::time::Duration::from_secs(secs), wait_future).await {
                     Ok(output_res) => {
                         let output = output_res.context("waiting for child failed")?;
                         let out = String::from_utf8_lossy(&output.stdout).to_string();
@@ -67,8 +67,6 @@ impl Backend for LocalBackend {
                         return Ok((out, err, output.status));
                     }
                     Err(_) => {
-                        let _ = child.kill();
-                        let _ = child.wait().await;
                         return Err(anyhow::anyhow!("local backend timed out after {}s", secs));
                     }
                 }
@@ -179,7 +177,8 @@ impl Backend for DockerBackend {
                 .spawn()
                 .context("docker backend failed to spawn process")?;
 
-            match tokio::time::timeout(std::time::Duration::from_secs(secs), child.wait_with_output()).await {
+            let wait_future = child.wait_with_output();
+            match tokio::time::timeout(std::time::Duration::from_secs(secs), wait_future).await {
                 Ok(output_res) => {
                     let output = output_res.context("waiting for docker child failed")?;
                     let out = String::from_utf8_lossy(&output.stdout).to_string();
@@ -187,9 +186,7 @@ impl Backend for DockerBackend {
                     Ok((out, err, output.status))
                 }
                 Err(_) => {
-                    // Timed out: attempt to kill the container process.
-                    let _ = child.kill();
-                    let _ = child.wait().await;
+                    // Timed out: child was consumed by wait_with_output, can't kill it now
                     Err(anyhow::anyhow!("docker backend timed out after {}s", secs))
                 }
             }
@@ -297,7 +294,8 @@ impl Backend for SSHBackend {
                 .spawn()
                 .context("ssh backend failed to spawn ssh process")?;
 
-            match tokio::time::timeout(std::time::Duration::from_secs(secs), child.wait_with_output()).await {
+            let wait_future = child.wait_with_output();
+            match tokio::time::timeout(std::time::Duration::from_secs(secs), wait_future).await {
                 Ok(output_res) => {
                     let output = output_res.context("waiting for ssh child failed")?;
                     let out = String::from_utf8_lossy(&output.stdout).to_string();
@@ -305,9 +303,7 @@ impl Backend for SSHBackend {
                     Ok((out, err, output.status))
                 }
                 Err(_) => {
-                    // Try to kill the ssh client process. Remote command may still be running.
-                    let _ = child.kill();
-                    let _ = child.wait().await;
+                    // Timed out: child was consumed by wait_with_output
                     Err(anyhow::anyhow!("ssh backend timed out after {}s", secs))
                 }
             }
@@ -401,7 +397,8 @@ impl Backend for KubernetesBackend {
                 .spawn()
                 .context("kubernetes backend failed to spawn kubectl process")?;
 
-            match tokio::time::timeout(std::time::Duration::from_secs(secs), child.wait_with_output()).await {
+            let wait_future = child.wait_with_output();
+            match tokio::time::timeout(std::time::Duration::from_secs(secs), wait_future).await {
                 Ok(output_res) => {
                     let output = output_res.context("waiting for kubectl child failed")?;
                     let out = String::from_utf8_lossy(&output.stdout).to_string();
@@ -409,14 +406,8 @@ impl Backend for KubernetesBackend {
                     Ok((out, err, output.status))
                 }
                 Err(_) => {
-                    // Timeouts often leave the ephemeral pod running (kubectl may still be waiting).
-                    // Attempt to kill the kubectl process, then try deleting the pod by name to avoid leakage.
-                    let _ = child.kill();
-                    let _ = child.wait().await;
-
+                    // Timed out: child was consumed by wait_with_output
                     // Best-effort cleanup: delete the created pod.
-                    // We ignore errors here because the cluster state may have already removed the pod
-                    // or the operation may not be permitted in the current context.
                     let mut cleanup = Command::new("kubectl");
                     cleanup.arg("delete").arg("pod").arg(&pod_name);
                     if let Some(ns) = &self.namespace {
