@@ -11,8 +11,13 @@ It allows you to define complex task DAGs (Directed Acyclic Graphs) in YAML and 
 - **Concurrency control**: Limit number of tasks running in parallel.
 - **Retries & fail-fast**: Automatic retries with exponential backoff and configurable stop-on-failure.
 - **Task output interpolation**: Pass outputs from one task to another using `{{task.output}}` syntax.
+- **JSON path access**: Extract nested fields from JSON task outputs using dot notation (`{{task.output.field.subfield}}`).
+- **Environment variable integration**: Reference environment variables (`${ENV:VAR_NAME}`) and file contents (`${FILE:/path}`).
 - **Intelligent caching**: Cache task results by key to avoid redundant executions.
 - **Secrets management**: Secure handling of sensitive data through dedicated secrets configuration.
+- **Conditional execution**: Run tasks based on conditions (`when: "{{vars.ENV}} == 'production'"`).
+- **Task hooks**: Execute commands before, after, or on failure of tasks.
+- **Dry run mode**: Preview pipeline execution without running tasks (`--dry-run` flag).
 - **Artifacts & logging**: Capture logs and metadata for every task. Logs and task metadata are saved in `.rustypipe` for reproducibility.
 - **Progress indicators**: Real-time visual feedback with progress bars and task status.
 - **Run history**: Track and inspect past pipeline executions.
@@ -219,6 +224,102 @@ tasks:
     backend: local
 \`\`\`
 
+### JSON Output Parsing
+
+Extract nested fields from JSON task outputs using dot notation:
+
+\`\`\`yaml
+tasks:
+  - name: get_config
+    run: "cat config.json"  # Outputs: {"database": {"host": "localhost", "port": 5432}}
+    backend: local
+
+  - name: connect_db
+    depends_on: [get_config]
+    run: "psql -h {{get_config.output.database.host}} -p {{get_config.output.database.port}}"
+    backend: local
+\`\`\`
+
+### Environment Variables and File Secrets
+
+Reference environment variables and file contents for sensitive data:
+
+\`\`\`yaml
+tasks:
+  - name: deploy
+    run: "kubectl apply -f deployment.yaml --token ${ENV:KUBE_TOKEN}"
+    backend: local
+
+  - name: api_call
+    run: "curl -H 'Authorization: Bearer ${FILE:/secrets/api_token.txt}' https://api.example.com"
+    backend: local
+\`\`\`
+
+**Important**: Use environment variables and files for production secrets instead of hardcoding them in YAML.
+
+### Conditional Task Execution
+
+Run tasks only when specific conditions are met:
+
+\`\`\`yaml
+secrets:
+  ENV: "production"
+
+tasks:
+  - name: run_tests
+    run: "pytest tests/"
+    backend: local
+
+  - name: deploy_staging
+    depends_on: [run_tests]
+    run: "deploy.sh staging"
+    backend: local
+    when: "{{vars.ENV}} == 'staging'"
+
+  - name: deploy_production
+    depends_on: [run_tests]
+    run: "deploy.sh production"
+    backend: local
+    when: "{{vars.ENV}} == 'production'"
+\`\`\`
+
+Supports comparison operators: `==`, `!=`, `>`, `<`, `>=`, `<=`
+
+### Task Hooks
+
+Execute commands before, after, or on failure of tasks:
+
+\`\`\`yaml
+tasks:
+  - name: database_migration
+    before: "echo 'Taking database backup...'"
+    run: "python manage.py migrate"
+    after: "echo 'Migration completed successfully'"
+    on_failure: "python rollback.py && echo 'Migration rolled back'"
+    backend: local
+\`\`\`
+
+Hooks are useful for:
+- Setup and teardown operations
+- Notifications
+- Cleanup on failure
+- Logging and monitoring
+
+### Dry Run Mode
+
+Preview what would be executed without actually running tasks:
+
+\`\`\`bash
+rustypipe run pipeline.yaml --dry-run
+\`\`\`
+
+Dry run shows:
+- Task execution order
+- Interpolated commands
+- Conditional task skips
+- Hooks that would execute
+- All task settings
+
 ---
 
 ## CLI Commands
@@ -345,6 +446,10 @@ tasks:                        # Task definitions (required)
     timeout: integer          # Timeout in seconds (optional)
     cache_key: string         # Cache key template (optional)
     continue_on_fail: boolean # Continue pipeline on failure (default: false)
+    when: string              # Conditional expression (optional)
+    before: string            # Command to run before task (optional)
+    after: string             # Command to run after successful task (optional)
+    on_failure: string        # Command to run on task failure (optional)
 \`\`\`
 
 ### Backend Types
@@ -417,9 +522,11 @@ tasks:
 ## Examples
 
 See the \`examples/\` directory:
-- \`sample_pipeline_linux.yaml\` - Linux/macOS example
+- \`sample_pipeline_linux.yaml\` - Linux/macOS basic example
 - \`sample_pipeline.yaml\` - Windows PowerShell example
-- \`advanced_pipeline.yaml\` - Showcases all features
+- \`advanced_pipeline.yaml\` - Showcases backends, caching, and secrets
+- \`conditional_pipeline.yaml\` - Demonstrates conditional task execution
+- \`hooks_pipeline.yaml\` - Shows task hooks (before/after/on_failure)
 
 ---
 

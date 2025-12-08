@@ -35,6 +35,14 @@ pub struct TaskDef {
     pub cache_key: Option<String>,
     #[serde(default)]
     pub continue_on_fail: Option<bool>,
+    #[serde(default)]
+    pub when: Option<String>, // Conditional expression
+    #[serde(default)]
+    pub before: Option<String>, // Hook to run before task
+    #[serde(default)]
+    pub after: Option<String>, // Hook to run after successful task
+    #[serde(default)]
+    pub on_failure: Option<String>, // Hook to run if task fails
 }
 
 /// Load YAML file into Pipeline

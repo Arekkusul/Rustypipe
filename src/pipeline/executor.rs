@@ -1,5 +1,5 @@
 use crate::pipeline::parser::{TaskDef, load_pipeline, validate_pipeline};
-use crate::util::{create_run_dir, interpolate_command, write_artifact, timestamp};
+use crate::util::{create_run_dir, interpolate_command, write_artifact, timestamp, evaluate_condition};
 use crate::backends::Backend;
 use crate::backend_config::BackendManager;
 use crate::cache::Cache;
@@ -14,6 +14,161 @@ use tracing::{info, warn};
 use chrono::Utc;
 use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
+
+/// Helper to run a hook command
+async fn run_hook(
+    hook_name: &str,
+    hook_cmd: &str,
+    backend: &Arc<dyn Backend>,
+    pipeline_dir: &PathBuf,
+) -> Result<()> {
+    info!("Running {} hook: {}", hook_name, hook_cmd);
+    match backend.run(hook_cmd, pipeline_dir, None).await {
+        Ok((stdout, stderr, status)) => {
+            if !status.success() {
+                warn!("{} hook failed with status: {:?}", hook_name, status);
+                if !stdout.is_empty() {
+                    warn!("{} hook stdout: {}", hook_name, stdout);
+                }
+                if !stderr.is_empty() {
+                    warn!("{} hook stderr: {}", hook_name, stderr);
+                }
+            }
+            Ok(())
+        }
+        Err(e) => {
+            warn!("{} hook failed: {:?}", hook_name, e);
+            Ok(())
+        }
+    }
+}
+
+/// Dry run - show what would be executed without running tasks
+pub async fn dry_run_pipeline(path: &Path) -> Result<()> {
+    let pipeline = load_pipeline(path)?;
+    validate_pipeline(&pipeline)?;
+
+    println!("\n🔍 DRY RUN MODE - No tasks will be executed\n");
+    println!("Pipeline: {}", pipeline.name.unwrap_or_else(|| "unnamed".to_string()));
+    println!("Concurrency: {}", pipeline.concurrency.unwrap_or(4));
+    println!("Stop on fail: {}\n", pipeline.stop_on_fail.unwrap_or(false));
+
+    // Build dependency graph
+    let mut tasks_map: HashMap<String, TaskDef> = HashMap::new();
+    let mut indegree: HashMap<String, usize> = HashMap::new();
+    let mut adj: HashMap<String, Vec<String>> = HashMap::new();
+
+    for t in pipeline.tasks.into_iter() {
+        indegree.entry(t.name.clone()).or_insert(0);
+        for dep in &t.depends_on {
+            adj.entry(dep.clone()).or_default().push(t.name.clone());
+            *indegree.entry(t.name.clone()).or_insert(0) += 1;
+        }
+        tasks_map.insert(t.name.clone(), t);
+    }
+
+    // Compute execution order (topological sort)
+    let mut execution_order = Vec::new();
+    let mut queue: Vec<String> = indegree.iter()
+        .filter_map(|(n, &d)| if d == 0 { Some(n.clone()) } else { None })
+        .collect();
+
+    let mut current_indegree = indegree.clone();
+
+    while !queue.is_empty() {
+        let current_batch = queue.clone();
+        queue.clear();
+
+        for task_name in &current_batch {
+            execution_order.push(task_name.clone());
+
+            if let Some(children) = adj.get(task_name) {
+                for child in children {
+                    if let Some(degree) = current_indegree.get_mut(child) {
+                        *degree -= 1;
+                        if *degree == 0 {
+                            queue.push(child.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Display tasks in execution order
+    println!("📋 Tasks (execution order):\n");
+
+    let mut outputs = HashMap::new();
+    let mut vars = pipeline.secrets.clone();
+
+    for (idx, task_name) in execution_order.iter().enumerate() {
+        if let Some(task) = tasks_map.get(task_name) {
+            println!("  {}. Task: {}", idx + 1, task.name);
+            println!("     Backend: {}", task.backend.as_deref().unwrap_or("local"));
+
+            // Show dependencies
+            if !task.depends_on.is_empty() {
+                println!("     Depends on: {}", task.depends_on.join(", "));
+            }
+
+            // Check and show conditional execution
+            let mut would_skip = false;
+            if let Some(ref condition) = task.when {
+                let should_run = evaluate_condition(condition, &outputs, &vars);
+                println!("     When: {}", condition);
+                if !should_run {
+                    println!("     ⊘ Would be SKIPPED (condition evaluates to false)");
+                    would_skip = true;
+                }
+            }
+
+            if !would_skip {
+                // Show hooks
+                if let Some(ref before_hook) = task.before {
+                    let before_cmd = interpolate_command(before_hook, &outputs, &vars);
+                    println!("     Before hook: {}", before_cmd);
+                }
+
+                // Interpolate and show command
+                let interpolated_cmd = interpolate_command(&task.run, &outputs, &vars);
+                println!("     Command: {}", interpolated_cmd);
+
+                if let Some(ref after_hook) = task.after {
+                    let after_cmd = interpolate_command(after_hook, &outputs, &vars);
+                    println!("     After hook: {}", after_cmd);
+                }
+
+                if let Some(ref failure_hook) = task.on_failure {
+                    let failure_cmd = interpolate_command(failure_hook, &outputs, &vars);
+                    println!("     On failure hook: {}", failure_cmd);
+                }
+
+                // Show optional settings
+                if let Some(retries) = task.retries {
+                    println!("     Retries: {}", retries);
+                }
+                if let Some(timeout) = task.timeout {
+                    println!("     Timeout: {}s", timeout);
+                }
+                if let Some(ref cache_key) = task.cache_key {
+                    println!("     Cache key: {}", cache_key);
+                }
+                if task.continue_on_fail.unwrap_or(false) {
+                    println!("     Continue on fail: true");
+                }
+            }
+
+            println!();
+
+            // Simulate output for next task interpolation (dry run only)
+            outputs.insert(task.name.clone(), format!("<output of {}>", task.name));
+        }
+    }
+
+    println!("✅ Dry run complete. {} tasks would be executed.", execution_order.len());
+
+    Ok(())
+}
 
 /// Public entry used by main.rs
 pub async fn run_pipeline(path: &Path) -> Result<()> {
@@ -274,6 +429,43 @@ async fn spawn_task_future(
         .with_context(|| format!("task '{}' not found in tasks map", task_name))?
         .clone();
 
+    // Interpolate command with outputs, vars, and secrets
+    let outputs_snapshot = outputs.lock().await.clone();
+    let vars_snapshot = vars.lock().await.clone();
+
+    // Merge secrets into vars for interpolation (secrets take precedence)
+    let mut combined_vars = vars_snapshot.clone();
+    for (k, v) in secrets.as_ref() {
+        combined_vars.insert(k.clone(), v.clone());
+    }
+
+    // Check conditional execution
+    if let Some(ref condition) = task_def.when {
+        let should_run = evaluate_condition(condition, &outputs_snapshot, &combined_vars);
+
+        if !should_run {
+            info!("Task '{}' skipped due to condition: {}", task_name, condition);
+            if let Some(ref pb) = progress {
+                pb.finish_with_message(format!("⊘ {} (skipped)", task_name));
+            }
+
+            // Return success with empty output
+            #[cfg(unix)]
+            let status = {
+                use std::os::unix::process::ExitStatusExt;
+                std::process::ExitStatus::from_raw(0)
+            };
+
+            #[cfg(windows)]
+            let status = {
+                use std::os::windows::process::ExitStatusExt;
+                std::process::ExitStatus::from_raw(0)
+            };
+
+            return Ok((task_name, String::from("skipped"), String::new(), String::new(), status, false));
+        }
+    }
+
     let retries = task_def.retries.unwrap_or(0);
     let timeout_secs = task_def.timeout;
 
@@ -285,17 +477,13 @@ async fn spawn_task_future(
     let backend_name = task_def.backend.as_deref().unwrap_or("local");
     let backend = backend_manager.get(backend_name);
 
-    // Interpolate command with outputs, vars, and secrets
-    let outputs_snapshot = outputs.lock().await.clone();
-    let vars_snapshot = vars.lock().await.clone();
-
-    // Merge secrets into vars for interpolation (secrets take precedence)
-    let mut combined_vars = vars_snapshot.clone();
-    for (k, v) in secrets.as_ref() {
-        combined_vars.insert(k.clone(), v.clone());
-    }
-
     let cmd = interpolate_command(&task_def.run, &outputs_snapshot, &combined_vars);
+
+    // Run before hook if present
+    if let Some(ref before_hook) = task_def.before {
+        let before_cmd = interpolate_command(before_hook, &outputs_snapshot, &combined_vars);
+        let _ = run_hook("before", &before_cmd, &backend, &pipeline_dir).await;
+    }
 
     // Check cache if cache_key is present
     if let Some(cache_key_template) = &task_def.cache_key {
@@ -353,7 +541,32 @@ async fn spawn_task_future(
         }
     };
 
-    let (stdout, stderr, status) = result?;
+    let (stdout, stderr, status) = match result {
+        Ok((stdout, stderr, status)) => {
+            if status.success() {
+                // Run after hook on success
+                if let Some(ref after_hook) = task_def.after {
+                    let after_cmd = interpolate_command(after_hook, &outputs_snapshot, &combined_vars);
+                    let _ = run_hook("after", &after_cmd, &backend, &pipeline_dir).await;
+                }
+            } else {
+                // Run on_failure hook on failure
+                if let Some(ref failure_hook) = task_def.on_failure {
+                    let failure_cmd = interpolate_command(failure_hook, &outputs_snapshot, &combined_vars);
+                    let _ = run_hook("on_failure", &failure_cmd, &backend, &pipeline_dir).await;
+                }
+            }
+            (stdout, stderr, status)
+        }
+        Err(e) => {
+            // Run on_failure hook on error
+            if let Some(ref failure_hook) = task_def.on_failure {
+                let failure_cmd = interpolate_command(failure_hook, &outputs_snapshot, &combined_vars);
+                let _ = run_hook("on_failure", &failure_cmd, &backend, &pipeline_dir).await;
+            }
+            return Err(e);
+        }
+    };
 
     // Cache result if cache_key is present
     if let Some(cache_key_template) = &task_def.cache_key {

@@ -28,10 +28,15 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     match cli.command {
-        Commands::Run { path, concurrency, stop_on_fail, continue_on_fail } => {
+        Commands::Run { path, concurrency, stop_on_fail, continue_on_fail, dry_run } => {
             // TODO: Apply CLI overrides to pipeline config
             let _ = (concurrency, stop_on_fail, continue_on_fail); // Prevent unused warnings
-            pipeline::run_pipeline(&path).await.context("pipeline run failed")?;
+
+            if dry_run {
+                pipeline::dry_run_pipeline(&path).await.context("dry run failed")?;
+            } else {
+                pipeline::run_pipeline(&path).await.context("pipeline run failed")?;
+            }
         }
         Commands::Validate { path } => {
             pipeline::validate_pipeline_file(&path)?;
