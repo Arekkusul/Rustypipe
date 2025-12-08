@@ -1,0 +1,41 @@
+name: conditional_demo
+concurrency: 2
+stop_on_fail: false
+
+secrets:
+  ENV: "production"
+  DEPLOY: "true"
+
+tasks:
+  - name: setup
+    run: "echo 'Setting up...'"
+    backend: local
+
+  - name: production_task
+    depends_on: [setup]
+    run: "echo 'Running in production mode'"
+    backend: local
+    when: "{{vars.ENV}} == 'production'"
+
+  - name: development_task
+    depends_on: [setup]
+    run: "echo 'Running in development mode'"
+    backend: local
+    when: "{{vars.ENV}} == 'development'"
+
+  - name: deploy_task
+    depends_on: [production_task]
+    run: "echo 'Deploying application'"
+    backend: local
+    when: "{{vars.DEPLOY}} == 'true'"
+
+  - name: skip_task
+    depends_on: [setup]
+    run: "echo 'This will never run'"
+    backend: local
+    when: "false"
+
+  - name: final_task
+    depends_on: [setup, production_task, development_task]
+    run: "echo 'Pipeline completed'"
+    backend: local

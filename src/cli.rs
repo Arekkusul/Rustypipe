@@ -32,6 +32,10 @@ pub enum Commands {
         /// Continue on all failures (overrides pipeline config)
         #[arg(long, conflicts_with = "stop_on_fail")]
         continue_on_fail: bool,
+
+        /// Dry run mode - show what would be executed without running tasks
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// Validate a pipeline YAML file without running it

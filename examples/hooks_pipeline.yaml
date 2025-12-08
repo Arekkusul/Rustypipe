@@ -1,0 +1,29 @@
+name: hooks_demo
+concurrency: 2
+stop_on_fail: false
+
+tasks:
+  - name: task_with_before_after
+    run: "echo 'Main task running'"
+    backend: local
+    before: "echo 'Before hook: preparing environment'"
+    after: "echo 'After hook: cleaning up'"
+
+  - name: task_with_failure_hook
+    run: "exit 1"
+    backend: local
+    continue_on_fail: true
+    on_failure: "echo 'On failure hook: notifying team'"
+
+  - name: all_hooks
+    depends_on: [task_with_before_after]
+    run: "echo 'Task with all hooks'"
+    backend: local
+    before: "echo 'Before: Setting up'"
+    after: "echo 'After: Success cleanup'"
+    on_failure: "echo 'On failure: Error cleanup'"
+
+  - name: final_task
+    depends_on: [all_hooks, task_with_failure_hook]
+    run: "echo 'Pipeline completed'"
+    backend: local
