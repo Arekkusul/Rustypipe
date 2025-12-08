@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use anyhow::Context;
 use std::collections::{HashMap, HashSet};
+use crate::backend_config::BackendConfig;
 
 /// Pipeline and TaskDef with Serialize + Deserialize so we can read & write YAML
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -11,6 +12,10 @@ pub struct Pipeline {
     pub concurrency: Option<usize>,
     #[serde(default)]
     pub stop_on_fail: Option<bool>,
+    #[serde(default)]
+    pub backends: HashMap<String, BackendConfig>,
+    #[serde(default)]
+    pub secrets: HashMap<String, String>,
     pub tasks: Vec<TaskDef>,
 }
 

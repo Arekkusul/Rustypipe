@@ -1,0 +1,25 @@
+name: sample_linux
+concurrency: 3
+stop_on_fail: true
+
+tasks:
+  - name: download
+    run: "curl -o file.txt https://raw.githubusercontent.com/EbookFoundation/free-programming-books/master/books/free-programming-books-langs.md"
+    backend: local
+    retries: 2
+    timeout: 60
+
+  - name: count
+    depends_on: [download]
+    run: "wc -l < file.txt"
+    backend: local
+
+  - name: echo
+    depends_on: [count]
+    run: "echo 'The file has {{count.output}} lines'"
+    backend: local
+
+  - name: cleanup
+    depends_on: [echo]
+    run: "rm -f file.txt && echo 'Cleanup complete'"
+    backend: local
